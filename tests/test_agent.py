@@ -1,4 +1,4 @@
-"""Tests for the agentic portfolio harness."""
+"""Tests for the portfolio tool implementations exposed via MCP."""
 
 from __future__ import annotations
 

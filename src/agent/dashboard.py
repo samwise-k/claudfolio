@@ -93,7 +93,7 @@ portfolios = list(
 )
 
 if not portfolios:
-    st.warning("No portfolios found. Run `sfe run-agent` first.")
+    st.warning("No portfolios found. Run `/weekly-review` in Claude Code first.")
     st.stop()
 
 portfolio_names = [p.name for p in portfolios]
@@ -215,7 +215,7 @@ if agent_sessions:
     )
     st.plotly_chart(fig_equity, use_container_width=True)
 else:
-    st.info("No agent sessions yet — run `sfe run-agent` to start building history.")
+    st.info("No agent sessions yet — run `/weekly-review` in Claude Code to start building history.")
 
 # ---------------------------------------------------------------------------
 # Trade history

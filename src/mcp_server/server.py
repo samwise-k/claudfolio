@@ -1,8 +1,8 @@
 """MCP server (stdio) exposing SFE engines, portfolio actions, and tracking queries.
 
 Primary interface for driving the Signal Fusion Engine from an external agent.
-The legacy standalone harness in src/agent/harness.py is preserved for reference
-but is no longer the recommended entrypoint.
+Procedural playbooks (weekly review, event-driven review) live as Claude Code
+skills in `.claude/skills/`; this server provides the underlying capabilities.
 
 Tool groups:
   - Engines:   sentiment_aggregate, quant_aggregate, enrichment_aggregate,

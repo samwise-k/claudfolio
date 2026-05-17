@@ -1,4 +1,4 @@
-"""Agent tool definitions and execution for the portfolio harness.
+"""Agent tool definitions and execution for the portfolio MCP server.
 
 Each tool has a JSON schema (for the Anthropic tool_use API) and an execute
 function that takes the parsed input and returns a result dict.

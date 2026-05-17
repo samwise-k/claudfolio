@@ -349,43 +349,6 @@ def render_dashboard(
     return str(result)
 
 
-def run_agent(
-    on_date: Date,
-    session: Session,
-    *,
-    model: str = "claude-sonnet-4-6",
-    portfolio_name: str = "default",
-    starting_equity: float = 100_000.0,
-) -> dict[str, Any]:
-    """Run the agentic portfolio harness for one day."""
-    from src.agent.harness import run_agent as _run_agent
-
-    logger.info("run-agent: {d} (portfolio={p})", d=on_date, p=portfolio_name)
-    result = _run_agent(
-        session,
-        on_date,
-        model=model,
-        portfolio_name=portfolio_name,
-        starting_equity=starting_equity,
-    )
-    logger.info(
-        "run-agent: {d} decisions, equity ${eq:,.2f}",
-        d=result["decisions_made"],
-        eq=result["snapshot_after"]["equity"],
-    )
-
-    if on_date == Date.today():
-        try:
-            counts = prune_old_data(session)
-            total = sum(counts.values())
-            if total:
-                logger.info("post-agent prune: {n} rows reclaimed {c}", n=total, c=counts)
-        except Exception as exc:
-            logger.warning("post-agent prune failed (non-fatal): {exc}", exc=exc)
-
-    return result
-
-
 def prune_old_data(
     session: Session,
     *,

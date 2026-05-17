@@ -302,43 +302,6 @@ def cmd_dashboard(args: argparse.Namespace) -> int:
     return 0
 
 
-def cmd_run_agent(args: argparse.Namespace) -> int:
-    from src.core import run_agent
-
-    session = _bootstrap_db()
-    on_date = _parse_date(args)
-    try:
-        result = run_agent(
-            on_date,
-            session,
-            model=args.model,
-            portfolio_name=args.portfolio,
-            starting_equity=float(args.starting_equity),
-        )
-    except Exception as exc:
-        logger.exception(f"agent run failed: {exc}")
-        return 1
-    finally:
-        session.close()
-
-    snap = result["snapshot_after"]
-    print(f"\n{'='*60}")
-    print(f"Agent run complete — {on_date.isoformat()}")
-    print(f"  Decisions: {result['decisions_made']}")
-    print(f"  Equity:    ${snap['equity']:,.2f}")
-    print(f"  Cash:      ${snap['cash']:,.2f}")
-    print(f"  Positions: {snap['position_count']}")
-    print(f"  Return:    {snap['total_return_pct']:+.2f}%")
-    print(f"{'='*60}")
-
-    for pos in snap["positions"]:
-        pnl = pos["unrealized_pnl"]
-        sign = "+" if pnl >= 0 else ""
-        print(f"  {pos['ticker']:6s}  {pos['direction']:5s}  {pos['shares']:>8.2f} shares  "
-              f"${pos['current_price']:>9.2f}  {sign}${pnl:,.2f}")
-    return 0
-
-
 def cmd_prune(args: argparse.Namespace) -> int:
     from src.core import prune_old_data
 
@@ -454,13 +417,6 @@ def build_parser() -> argparse.ArgumentParser:
     p_dash.add_argument("--date", help="ISO date (YYYY-MM-DD); defaults to today")
     p_dash.add_argument("--output", help="Output file path (default: output/dashboard.html)")
     p_dash.set_defaults(func=cmd_dashboard)
-
-    p_agent = subs.add_parser("run-agent", help="Run the agentic portfolio manager")
-    p_agent.add_argument("--date", help="ISO date (YYYY-MM-DD); defaults to today")
-    p_agent.add_argument("--model", default="claude-opus-4-6", help="Claude model to use (default: claude-opus-4-6)")
-    p_agent.add_argument("--portfolio", default="default", help="Portfolio name (default: default)")
-    p_agent.add_argument("--starting-equity", default="100000", help="Starting equity for new portfolios (default: 100000)")
-    p_agent.set_defaults(func=cmd_run_agent)
 
     p_prune = subs.add_parser("prune", help="Delete engine rows past retention window")
     p_prune.add_argument(

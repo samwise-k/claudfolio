@@ -7,14 +7,16 @@ Agentic portfolio management experiment. Sentiment, quantitative, and enrichment
 The agent operates under the strategy framework in [STRATEGY.md](./STRATEGY.md) — mandate, benchmark (QQQ), net-long band (70-85%), three-tier position sizing, kill rules (-15% hard / -10% trailing / thesis-break, -7% defensive / -10% kill at the portfolio level), and weekly review cadence. Update STRATEGY.md when the strategy evolves; do not let practice drift from documentation.
 
 ```
-$ uv run sfe run-agent
+> /weekly-review
 
-[agent] Reviewing pre-market signals for 2026-05-02...
-[agent] Opening position: NVDA long 5% of portfolio @ $950 — sentiment 0.52,
-        bullish insider activity, earnings catalyst May 28
-[agent] Trimming JPM from 8% → 4% — quant health deteriorating, sector-relative
-        underperformance
-[agent] Portfolio: 12 positions, $98,420 equity, +1.8% since inception
+[skill] Loading STRATEGY.md…
+[mcp]   run_signals(2026-05-04) — 21 tickers refreshed
+[mcp]   score_signals — 8 open positions scored
+[agent] NVDA long 5% — thesis intact, sentiment 0.52, hold
+[agent] JPM long 8% → 4% — quant health deteriorating, trim per
+        STRATEGY.md § Position sizing
+[agent] Opening AVGO long 4% — medium-tier conviction setup, insider buys
+[agent] Portfolio: 9 positions, $98,420 equity, +1.8% since inception
 ```
 
 ## Quick start
@@ -64,12 +66,21 @@ The repo ships a `.mcp.json` file so Claude Code picks the server up
 automatically when the project directory is opened. Approve it once via
 `/mcp` and the tools become available in-session.
 
-## Legacy standalone agent
+## Procedural skills
 
-The original tool-use harness in `src/agent/harness.py` is preserved for
-reference and remains runnable via `uv run sfe run-agent`. It and the MCP
-server share the same tool implementations in `src/agent/tools.py`, so both
-stay in sync. New work should target the MCP server.
+Two Claude Code skills live in `.claude/skills/` and drive the agent through
+the MCP tools:
+
+- **`/weekly-review`** — Monday cadence. Refresh signals, score open
+  positions against kill rules, redeploy fresh conviction. Fully prescriptive
+  recipe with portfolio-level guardrails before any trade fires.
+- **`/event-review`** — Catalyst-driven, narrow. Use after earnings prints,
+  Fed/CPI days, single-name news, or stop hits. Does not redeploy fresh
+  conviction.
+
+Both skills defer to [STRATEGY.md](./STRATEGY.md) for policy (mandate,
+sizing tiers, kill rules, sector cap). Edit STRATEGY.md and both skills pick
+up the change automatically.
 
 ## What it does
 
@@ -81,8 +92,8 @@ EDGAR (SEC filings: 8-K, 10-K, 10-Q)                                          �
 finlight (financial news)                                                         + Quant
 yfinance (OHLCV, technicals, options chains)                                      + Enrichment
                                                                                      ↓
-                                                                            Claude agent harness
-                                                                              (agentic tool loop)
+                                                                            Claude Code + MCP
+                                                                              (skill-driven loop)
                                                                                      ↓
                                                                           Simulated portfolio mgmt
                                                                          (positions, P&L, decisions)
@@ -102,13 +113,15 @@ The agent has near-full discretion. There are minimal guardrails — the experim
 
 ### Agent (primary workflow)
 
+The agent runs inside Claude Code against the MCP server. There is no
+standalone `sfe run-agent` command — use the `/weekly-review` or
+`/event-review` skills described above.
+
 | Command | What it does |
 |---------|-------------|
-| `sfe run-agent` | Run the agent — reviews signals, makes portfolio decisions |
 | `sfe run-signals` | Run all 3 engines for the full watchlist (no Claude call) |
+| `sfe-mcp` | Smoke test the MCP server (Ctrl-C to exit) |
 | `sfe-dashboard` | Launch the Streamlit portfolio dashboard |
-
-`run-agent` accepts `--date`, `--model` (default: claude-opus-4-6), `--portfolio` (default: default), and `--starting-equity` (default: 100000).
 
 ### Engines
 
@@ -133,7 +146,7 @@ All commands accept `--date YYYY-MM-DD` (defaults to today). Commands without `-
 | Key | Required for | Free tier |
 |-----|-------------|-----------|
 | `FINNHUB_KEY` | Sentiment, enrichment, earnings | Yes (60 calls/min) |
-| `ANTHROPIC_API_KEY` | `run-agent`, `run-meta`, `run-earnings-brief` | Pay-per-use |
+| `ANTHROPIC_API_KEY` | MCP-driven agent (Claude Code), `run-meta`, `run-earnings-brief` | Pay-per-use |
 | `SEC_EDGAR_USER_AGENT` | SEC filing fetches | Keyless (requires email in UA) |
 | `FINLIGHT_KEY` | Additional news sentiment | Yes |
 
@@ -181,7 +194,7 @@ npm run dev       # Vite dev server on :5173, proxies /api to 127.0.0.1:8000
 ### Tests
 
 ```bash
-uv run pytest               # ~300 tests across engines, harness, API, storage, and frontend smoke
+uv run pytest               # tests across engines, API, storage, and frontend smoke
 ```
 
 ## Layout
@@ -189,7 +202,7 @@ uv run pytest               # ~300 tests across engines, harness, API, storage, 
 ```
 config/      # watchlist.yaml, sources.yaml
 src/
-  agent/           # agentic harness, tools, system prompt, sub-agents, Streamlit dashboard
+  agent/           # MCP tool implementations, sub-agents, Streamlit dashboard
   mcp_server/      # MCP stdio server (`sfe-mcp` entry) — primary agent interface
   engines/
     sentiment/     # news, SEC → score → aggregate

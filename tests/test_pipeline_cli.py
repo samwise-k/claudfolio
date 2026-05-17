@@ -60,7 +60,7 @@ class TestBuildParser:
     @pytest.mark.parametrize("subcommand", [
         "run-sentiment", "run-quant", "run-enrichment", "run-meta",
         "earnings-calendar", "log-signal", "run-signals",
-        "generate-signals", "score-signals", "dashboard", "run-agent", "run-all",
+        "generate-signals", "score-signals", "dashboard", "run-all",
     ])
     def test_subcommand_parses(self, subcommand):
         parser = pipeline.build_parser()
@@ -279,38 +279,6 @@ class TestGenerateSignalsCli:
         out = capsys.readouterr().out
         assert rc == 0
         assert "Logged 1 signals" in out
-
-
-# ─────────────────────────── run-agent ─────────────────────────── #
-
-
-class TestRunAgentCli:
-    def test_agent_failure_returns_1(self, monkeypatch):
-        monkeypatch.setattr(core, "run_agent", lambda *a, **k: (_ for _ in ()).throw(RuntimeError("api key")))
-        rc = pipeline.cmd_run_agent(_ns(
-            date=None, model="m", portfolio="default", starting_equity="100000",
-        ))
-        assert rc == 1
-
-    def test_agent_success_prints_summary(self, monkeypatch, capsys):
-        monkeypatch.setattr(core, "run_agent", lambda *a, **k: {
-            "decisions_made": 2,
-            "snapshot_after": {
-                "equity": 105_000.0, "cash": 50_000.0,
-                "position_count": 1, "total_return_pct": 5.0,
-                "positions": [{
-                    "ticker": "NVDA", "direction": "long", "shares": 10.0,
-                    "current_price": 950.0, "unrealized_pnl": 500.0,
-                }],
-            },
-        })
-        rc = pipeline.cmd_run_agent(_ns(
-            date="2026-05-01", model="m", portfolio="default", starting_equity="100000",
-        ))
-        out = capsys.readouterr().out
-        assert rc == 0
-        assert "Decisions: 2" in out
-        assert "NVDA" in out
 
 
 # ─────────────────────────── run-all ─────────────────────────── #
