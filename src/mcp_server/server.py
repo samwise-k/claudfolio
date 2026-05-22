@@ -29,7 +29,7 @@ from src.agent.tools import TOOL_SCHEMAS as PORTFOLIO_TOOL_SCHEMAS
 from src.agent.tools import ToolContext, execute_tool
 from src.bootstrap import load_env
 from src.storage.db import get_session
-from src.storage.portfolio_repo import get_or_create_portfolio, portfolio_snapshot
+from src.storage.portfolio_repo import get_or_create_portfolio
 
 load_env()
 
@@ -326,12 +326,21 @@ def _portfolio_dispatch(name: str, args: dict[str, Any]) -> Any:
         tickers = [t["ticker"] for t in signals_payload.get("tickers", [])]
         current_prices = _fetch_prices(tickers)
 
+        from src.execution.factory import build_broker
+
+        broker = build_broker(
+            session=session,
+            portfolio=portfolio,
+            current_prices=current_prices,
+            trade_date=today,
+        )
         ctx = ToolContext(
             session=session,
             portfolio=portfolio,
             signals_payload=signals_payload,
             current_prices=current_prices,
             trade_date=today,
+            broker=broker,
         )
         result_json = execute_tool(ctx, name, args)
         return json.loads(result_json)

@@ -211,6 +211,41 @@ class AgentSession(Base):
     )
 
 
+class BrokerOrder(Base):
+    """Write-ahead log of broker orders for crash-safety and reconciliation.
+
+    A row is inserted in ``submitted`` state *before* the broker call. The
+    ``client_order_id`` is the idempotency key — on restart, any row not in
+    a terminal status is resolved against the broker before the agent runs.
+    """
+
+    __tablename__ = "broker_order"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    client_order_id: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    broker_order_id: Mapped[str | None] = mapped_column(
+        String(64), nullable=True, index=True
+    )
+    portfolio_id: Mapped[int] = mapped_column(Integer, index=True)
+    ticker: Mapped[str] = mapped_column(String(10), index=True)
+    side: Mapped[str] = mapped_column(String(16))  # buy/sell/sell_short/buy_to_cover
+    qty_requested: Mapped[float] = mapped_column(Float)
+    order_type: Mapped[str] = mapped_column(String(16))  # market/limit
+    limit_price: Mapped[float | None] = mapped_column(Float, nullable=True)
+    status: Mapped[str] = mapped_column(String(16), index=True)
+    qty_filled: Mapped[float] = mapped_column(Float, default=0.0)
+    avg_fill_price: Mapped[float | None] = mapped_column(Float, nullable=True)
+    reasoning: Mapped[str | None] = mapped_column(Text, nullable=True)
+    backend: Mapped[str] = mapped_column(String(16))  # simulated/schwab
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    submitted_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    filled_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
+
 class BriefingDaily(Base):
     """Cached meta-layer briefing output (Phase 5).
 

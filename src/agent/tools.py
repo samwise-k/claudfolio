@@ -13,15 +13,12 @@ from typing import Any
 from loguru import logger
 from sqlalchemy.orm import Session
 
+from src.execution.broker import Broker
 from src.storage.models import EnrichmentDaily, Portfolio, QuantDaily, SentimentDaily
 from src.storage.portfolio_repo import (
-    close_position,
     get_position,
-    get_positions,
     get_trades,
-    open_position,
     portfolio_snapshot,
-    resize_position,
 )
 
 # ---------------------------------------------------------------------------
@@ -254,12 +251,24 @@ class ToolContext:
         signals_payload: dict[str, Any],
         current_prices: dict[str, float],
         trade_date: Date,
+        broker: Broker | None = None,
     ):
         self.session = session
         self.portfolio = portfolio
         self.signals_payload = signals_payload
         self.current_prices = current_prices
         self.trade_date = trade_date
+        self._broker = broker
+
+    @property
+    def broker(self) -> Broker:
+        if self._broker is None:
+            from src.execution.simulated import SimulatedBroker
+
+            self._broker = SimulatedBroker(
+                self.session, self.portfolio, self.current_prices, self.trade_date
+            )
+        return self._broker
 
     def _snapshot(self) -> dict[str, Any]:
         return portfolio_snapshot(
@@ -374,22 +383,34 @@ def _exec_open_position(ctx: ToolContext, inp: dict) -> dict:
     target_value = equity * (alloc_pct / 100.0)
     shares = round(target_value / price, 4)
 
-    if shares * price > ctx.portfolio.cash and direction == "long":
+    if direction == "long" and shares * price > ctx.portfolio.cash:
         return {
             "error": f"Insufficient cash. Need ${shares * price:,.2f} but only ${ctx.portfolio.cash:,.2f} available."
         }
 
-    pos = open_position(
-        ctx.session, ctx.portfolio, ticker, direction,
-        shares, price, ctx.trade_date, reasoning,
+    side = "buy" if direction == "long" else "sell_short"
+    ticket = ctx.broker.submit(
+        ticker=ticker, side=side, qty=shares,
+        order_type="market", reasoning=reasoning,
     )
+    if ticket.status == "rejected":
+        return {"error": ticket.error or "order rejected"}
+    if ticket.status != "filled":
+        return {
+            "status": ticket.status,
+            "ticker": ticker,
+            "client_order_id": ticket.client_order_id,
+            "message": "order submitted, fill pending",
+        }
+
+    fill_price = ticket.avg_fill_price or price
     return {
         "status": "opened",
         "ticker": ticker,
         "direction": direction,
-        "shares": pos.shares,
-        "price": price,
-        "cost": round(shares * price, 2),
+        "shares": ticket.qty_filled,
+        "price": fill_price,
+        "cost": round(ticket.qty_filled * fill_price, 2),
         "allocation_pct": alloc_pct,
     }
 
@@ -402,22 +423,37 @@ def _exec_close_position(ctx: ToolContext, inp: dict) -> dict:
     if pos is None:
         return {"error": f"No open position in {ticker}"}
 
-    price = ctx.current_prices.get(ticker)
-    if price is None:
-        price = pos.current_price or pos.entry_price
+    shares = pos.shares
+    entry_price = pos.entry_price
+    direction = pos.direction
+    side = "sell" if direction == "long" else "buy_to_cover"
 
-    if pos.direction == "long":
-        pnl = (price - pos.entry_price) * pos.shares
+    ticket = ctx.broker.submit(
+        ticker=ticker, side=side, qty=shares,
+        order_type="market", reasoning=reasoning,
+    )
+    if ticket.status == "rejected":
+        return {"error": ticket.error or "order rejected"}
+    if ticket.status != "filled":
+        return {
+            "status": ticket.status,
+            "ticker": ticker,
+            "client_order_id": ticket.client_order_id,
+            "message": "close order submitted, fill pending",
+        }
+
+    fill_price = ticket.avg_fill_price or ctx.current_prices.get(ticker, entry_price)
+    if direction == "long":
+        pnl = (fill_price - entry_price) * shares
     else:
-        pnl = (pos.entry_price - price) * pos.shares
+        pnl = (entry_price - fill_price) * shares
 
-    close_position(ctx.session, ctx.portfolio, pos, price, ctx.trade_date, reasoning)
     return {
         "status": "closed",
         "ticker": ticker,
-        "shares": pos.shares,
-        "entry_price": pos.entry_price,
-        "exit_price": price,
+        "shares": shares,
+        "entry_price": entry_price,
+        "exit_price": fill_price,
         "realized_pnl": round(pnl, 2),
     }
 
@@ -438,23 +474,53 @@ def _exec_resize_position(ctx: ToolContext, inp: dict) -> dict:
     equity = ctx._equity()
     target_value = equity * (new_alloc_pct / 100.0)
     new_shares = round(target_value / price, 4)
+    old_shares = pos.shares
+    delta = new_shares - old_shares
 
-    delta = new_shares - pos.shares
-    if delta > 0 and (delta * price) > ctx.portfolio.cash and pos.direction == "long":
+    if abs(delta) < 1e-4:
         return {
-            "error": f"Insufficient cash to increase position. Need ${delta * price:,.2f} more."
+            "status": "noop",
+            "ticker": ticker,
+            "shares": old_shares,
+            "message": "already at target allocation",
         }
 
-    resize_position(
-        ctx.session, ctx.portfolio, pos, new_shares,
-        price, ctx.trade_date, reasoning,
+    if pos.direction == "long":
+        side = "buy" if delta > 0 else "sell"
+    else:
+        side = "sell_short" if delta > 0 else "buy_to_cover"
+
+    qty = abs(delta)
+    cash_needed = qty * price
+    if pos.direction == "long" and delta > 0 and cash_needed > ctx.portfolio.cash:
+        return {
+            "error": f"Insufficient cash to increase position. Need ${cash_needed:,.2f} more."
+        }
+    if pos.direction == "short" and delta < 0 and cash_needed > ctx.portfolio.cash:
+        return {
+            "error": f"Insufficient cash to cover. Need ${cash_needed:,.2f}."
+        }
+
+    ticket = ctx.broker.submit(
+        ticker=ticker, side=side, qty=qty,
+        order_type="market", reasoning=reasoning,
     )
+    if ticket.status == "rejected":
+        return {"error": ticket.error or "order rejected"}
+    if ticket.status != "filled":
+        return {
+            "status": ticket.status,
+            "ticker": ticker,
+            "client_order_id": ticket.client_order_id,
+            "message": "resize order submitted, fill pending",
+        }
+
     return {
         "status": "resized",
         "ticker": ticker,
-        "old_shares": pos.shares - delta,
+        "old_shares": old_shares,
         "new_shares": new_shares,
-        "price": price,
+        "price": ticket.avg_fill_price or price,
         "new_allocation_pct": new_alloc_pct,
     }
 
